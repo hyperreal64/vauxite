@@ -1,0 +1,13 @@
+ref: vauxite/f35/${basearch}/base
+
+include: xfce-desktop-pkgs.yaml
+
+rojig:
+  name: vauxite
+  summary: "Vauxite base image"
+  license: MIT
+  description: "Immutable Fedora-based Xfce Desktop"
+
+repos:
+  - fedora-35
+  - fedora-35-updates
