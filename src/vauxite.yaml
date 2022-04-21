@@ -1,4 +1,4 @@
-ref: vauxite/stable/${basearch}/base
+ref: vauxite/f35/${basearch}/base
 
 include: xfce-desktop-pkgs.yaml
 

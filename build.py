@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+# Usage: sudo ./build.py
 
 import glob
 import os
 import selinux
 import shutil
 import subprocess
+
 
 # Global variables
 base_dir = os.getcwd()
@@ -16,40 +18,26 @@ ostree_repo_dir = os.path.join(working_dir, "vauxite")
 srv_root = "/srv/ostree"
 srv_repo_dir = os.path.join(srv_root, "vauxite")
 
-
-# Exception handling function
-def handle_exception(ex):
-    if ex is shutil.Error or ex is OSError:
-        exit_msg = "%s" % ex.strerror
-
-    if ex is subprocess.CalledProcessError:
-        exit_msg = "%s" % ex.stderr
-
-    exit("💥 %s" % exit_msg)
-
-
 # Check if running as root
 if os.geteuid() != 0:
     exit("🔒️ Permission denied. Are you root?")
 
-
 # Check if required commands exist
-print("⚡️ Running preliminary checks...")
-
-if shutil.which("ostree") is None:
-    exit("💥 ostree is not installed")
-
-if shutil.which("rpm-ostree") is None:
-    exit("💥 rpm-ostree is not installed")
-
-
-# Setup the build environment
-print("🔨 Setting up build environment...")
-
-if not os.path.exists(treefile):
-    exit("💥 vauxite.yaml does not exist")
-
 try:
+    print("⚡️ Running preliminary checks...")
+
+    if shutil.which("ostree") is None:
+        exit("💥 ostree is not installed")
+
+    if shutil.which("rpm-ostree") is None:
+        exit("💥 rpm-ostree is not installed")
+
+    # Setup the build environment
+    print("🔨 Setting up build environment...")
+
+    if not os.path.exists(treefile):
+        exit("💥 vauxite.yaml does not exist")
+
     if os.path.exists(ostree_cache_dir):
         shutil.rmtree(ostree_cache_dir)
 
@@ -58,35 +46,30 @@ try:
 
     os.makedirs(ostree_cache_dir)
     os.makedirs(ostree_repo_dir)
-    os.chown(working_dir, 0, 0)
 
-except Exception as ex:
-    handle_exception(ex)
+    # Initialize the OSTree repo
+    print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_dir)
 
-
-# Initialize the OSTree repo
-print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_dir)
-
-try:
-    ostree = subprocess.run(
-        ["ostree", "--repo=%s" % ostree_repo_dir, "init", "--mode=archive"],
-        capture_output=True,
+    subprocess.run(
+        [
+            "ostree",
+            "--repo=%s" % ostree_repo_dir,
+            "init",
+            "--mode=archive",
+        ],
         check=True,
+        text=True,
     )
 
-except Exception as ex:
-    handle_exception(ex)
+    # Build the ostree
+    print("⚡️ Building tree...")
 
-# Build the ostree
-print("⚡️ Building tree...")
-
-try:
     if os.path.exists(lockfile) and os.path.getsize(lockfile) > 0:
         cmd_tail = "--ex-lockfile=%s %s" % (lockfile, treefile)
     else:
         cmd_tail = "%s" % treefile
 
-    cmd_rpm_ostree = subprocess.run(
+    subprocess.run(
         [
             "rpm-ostree",
             "compose",
@@ -99,28 +82,20 @@ try:
         check=True,
         text=True,
     )
+    print()
 
-except Exception as ex:
-    handle_exception(ex)
+    # Generate the ostree summary
+    print("✏️ Generating summary...")
 
-# Generate the ostree summary
-print("✏️ Generating summary...")
-
-try:
-    cmd_gen_summary = subprocess.run(
+    subprocess.run(
         ["ostree", "summary", "--repo=%s" % ostree_repo_dir, "--update"],
         check=True,
         text=True,
     )
 
-except Exception as ex:
-    handle_exception(ex)
+    # Move repository to web server root
+    print("🚚 Moving built repository to web server root...")
 
-
-# Move repository to web server root
-print("🚚 Moving built repository to web server root...")
-
-try:
     if not os.path.isdir(srv_root):
         os.makedirs(srv_root)
 
@@ -128,20 +103,30 @@ try:
         if os.path.isdir(srv_repo_dir):
             selinux.install(srv_repo_dir, srv_repo_dir + ".old")
 
-        selinux.install(ostree_repo_dir, srv_root)
+        selinux.install(ostree_repo_dir, srv_repo_dir)
+        selinux.chcon(srv_repo_dir, "httpd_sys_content_t", recursive=True)
+        selinux.chcon(srv_repo_dir, "httpd_sys_rw_content_t", recursive=True)
     else:
         if os.path.isdir(srv_repo_dir):
             shutil.move(srv_repo_dir, srv_repo_dir + ".old")
 
-except Exception as ex:
-    handle_exception(ex)
+    # Clean up
+    print("🗑️  Cleaning up...")
 
-# Clean up
-print("🗑️  Cleaning up...")
-
-try:
     for dir in glob.glob("/var/tmp/rpm-ostree.*"):
         shutil.rmtree(dir)
 
-except Exception as ex:
-    handle_exception(ex)
+    shutil.rmtree(srv_repo_dir + ".old")
+
+except (shutil.Error, subprocess.CalledProcessError, OSError) as e:
+    if e is shutil.Error:
+        print("💥 shutil.Error: %s" % e.strerror)
+        exit(1)
+
+    if e is subprocess.CalledProcessError:
+        print("💥 subprocess.CalledProcessError: %s" % e.stderr)
+        exit(1)
+
+    if e is OSError:
+        print("💥 OSError: %s" % e.strerror)
+        exit(1)
