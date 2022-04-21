@@ -17,6 +17,17 @@ srv_root = "/srv/ostree"
 srv_repo_dir = os.path.join(srv_root, "vauxite")
 
 
+# Exception handling function
+def handle_exception(ex):
+    if ex is shutil.Error or ex is OSError:
+        exit_msg = "%s" % ex.strerror
+
+    if ex is subprocess.CalledProcessError:
+        exit_msg = "%s" % ex.stderr
+
+    exit("💥 %s" % exit_msg)
+
+
 # Check if running as root
 if os.geteuid() != 0:
     exit("🔒️ Permission denied. Are you root?")
@@ -45,19 +56,12 @@ try:
     if os.path.exists(ostree_repo_dir):
         shutil.rmtree(ostree_repo_dir)
 
-except shutil.Error:
-    raise OSError
-except OSError as e:
-    print("💥 Failed to remove %s" % e.filename)
-    exit(e.strerror)
-
-try:
     os.makedirs(ostree_cache_dir)
     os.makedirs(ostree_repo_dir)
     os.chown(working_dir, 0, 0)
 
-except OSError as e:
-    exit("💥 Error creating directory: %s" % e.filename)
+except Exception as ex:
+    handle_exception(ex)
 
 
 # Initialize the OSTree repo
@@ -70,18 +74,11 @@ try:
         check=True,
     )
 
-except subprocess.CalledProcessError as cpe:
-    print("💥 Error initializing OSTree repository at %s" % ostree_repo_dir)
-    exit(cpe.stderr)
-except OSError as e:
-    print("💥 Failed to initialize OSTree repository at %s" % ostree_repo_dir)
-    exit(e.strerror)
+except Exception as ex:
+    handle_exception(ex)
 
 # Build the ostree
 print("⚡️ Building tree...")
-
-term_size = os.get_terminal_size()
-print("=" * term_size.columns)
 
 try:
     if os.path.exists(lockfile) and os.path.getsize(lockfile) > 0:
@@ -102,15 +99,9 @@ try:
         check=True,
         text=True,
     )
-    print("=" * term_size.columns)
 
-except subprocess.CalledProcessError as cpe:
-    print("=" * term_size.columns)
-    print("💥 Failed to build tree")
-    exit(cpe.stderr)
-except OSError as e:
-    print("💥 Failed to build tree")
-    exit(e.strerror)
+except Exception as ex:
+    handle_exception(ex)
 
 # Generate the ostree summary
 print("✏️ Generating summary...")
@@ -122,12 +113,8 @@ try:
         text=True,
     )
 
-except subprocess.CalledProcessError as cpe:
-    print("💥 Failed to generate ostree summary")
-    exit(cpe.stderr)
-except OSError as e:
-    print("💥 Failed to generate ostree summary")
-    exit(e.strerror)
+except Exception as ex:
+    handle_exception(ex)
 
 
 # Move repository to web server root
@@ -146,12 +133,8 @@ try:
         if os.path.isdir(srv_repo_dir):
             shutil.move(srv_repo_dir, srv_repo_dir + ".old")
 
-except shutil.Error:
-    raise OSError
-except OSError as e:
-    print("💥 Failed to move built repository to web server root")
-    exit(e.strerror)
-
+except Exception as ex:
+    handle_exception(ex)
 
 # Clean up
 print("🗑️  Cleaning up...")
@@ -160,11 +143,5 @@ try:
     for dir in glob.glob("/var/tmp/rpm-ostree.*"):
         shutil.rmtree(dir)
 
-    sudo_user = os.environ["SUDO_USER"]
-    shutil.chown(working_dir, user=sudo_user, group=sudo_user)
-
-except shutil.Error:
-    raise OSError
-except OSError as e:
-    print("💥 Failed to cleanup!")
-    exit(e.strerror)
+except Exception as ex:
+    handle_exception(ex)
