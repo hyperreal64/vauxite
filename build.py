@@ -10,13 +10,12 @@ import subprocess
 
 # Global variables
 base_dir = os.getcwd()
-working_dir = os.path.join(base_dir, "build")
 treefile = os.path.join(base_dir, "src/vauxite.yaml")
 lockfile = os.path.join(base_dir, "src/overrides.yaml")
-ostree_cache_dir = os.path.join(working_dir, "cache")
-ostree_repo_dir = os.path.join(working_dir, "vauxite")
+ostree_cache_dir = "/var/cache/ostree"
 srv_root = "/srv/ostree"
-srv_repo_dir = os.path.join(srv_root, "vauxite")
+ostree_repo_dir = os.path.join(srv_root, "vauxite")
+ostree_repo_tmpdir = os.path.join(srv_root, "vauxite.new")
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -38,24 +37,22 @@ try:
     if not os.path.exists(treefile):
         exit("💥 vauxite.yaml does not exist")
 
-    if os.path.exists(ostree_cache_dir):
-        shutil.rmtree(ostree_cache_dir)
+    if os.path.exists(ostree_repo_tmpdir):
+        shutil.rmtree(ostree_repo_tmpdir)
+    os.makedirs(ostree_repo_tmpdir)
 
-    if os.path.exists(ostree_repo_dir):
-        shutil.rmtree(ostree_repo_dir)
+    if not os.path.exists(ostree_cache_dir):
+        os.makedirs(ostree_cache_dir)
 
-    os.makedirs(ostree_cache_dir)
-    os.makedirs(ostree_repo_dir)
-
-    # Initialize the OSTree repo
-    print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_dir)
+    # Initialize the new OSTree repo
+    print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_tmpdir)
 
     subprocess.run(
         [
             "ostree",
-            "--repo=%s" % ostree_repo_dir,
+            "--repo=%s" % ostree_repo_tmpdir,
             "init",
-            "--mode=archive",
+            "--mode=archive-z2",
         ],
         check=True,
         text=True,
@@ -76,7 +73,7 @@ try:
             "tree",
             "--unified-core",
             "--cachedir=%s" % ostree_cache_dir,
-            "--repo=%s" % ostree_repo_dir,
+            "--repo=%s" % ostree_repo_tmpdir,
             cmd_tail,
         ],
         check=True,
@@ -88,7 +85,7 @@ try:
     print("✏️ Generating summary...")
 
     subprocess.run(
-        ["ostree", "summary", "--repo=%s" % ostree_repo_dir, "--update"],
+        ["ostree", "summary", "--repo=%s" % ostree_repo_tmpdir, "--update"],
         check=True,
         text=True,
     )
@@ -96,19 +93,12 @@ try:
     # Move repository to web server root
     print("🚚 Moving built repository to web server root...")
 
-    if not os.path.isdir(srv_root):
-        os.makedirs(srv_root)
-
     if selinux.is_selinux_enabled():
-        if os.path.isdir(srv_repo_dir):
-            selinux.install(srv_repo_dir, srv_repo_dir + ".old")
-
-        selinux.install(ostree_repo_dir, srv_repo_dir)
-        selinux.chcon(srv_repo_dir, "httpd_sys_content_t", recursive=True)
-        selinux.chcon(srv_repo_dir, "httpd_sys_rw_content_t", recursive=True)
+        if os.path.exists(ostree_repo_dir):
+            shutil.rmtree(ostree_repo_dir)
+        selinux.install(ostree_repo_tmpdir, ostree_repo_dir)
     else:
-        if os.path.isdir(srv_repo_dir):
-            shutil.move(srv_repo_dir, srv_repo_dir + ".old")
+        shutil.move(ostree_repo_tmpdir, ostree_repo_dir)
 
     # Clean up
     print("🗑️  Cleaning up...")
@@ -116,17 +106,23 @@ try:
     for dir in glob.glob("/var/tmp/rpm-ostree.*"):
         shutil.rmtree(dir)
 
-    shutil.rmtree(srv_repo_dir + ".old")
+    # Change SELinux context to httpd_sys_content_t and httpd_sys_rw_content_t
+    if selinux.is_selinux_enabled():
+        subprocess.run(
+            ["chcon", "-t", "httpd_sys_content_t", ostree_repo_dir, "-R"],
+            check=True,
+            text=True,
+        )
 
-except (shutil.Error, subprocess.CalledProcessError, OSError) as e:
-    if e is shutil.Error:
-        print("💥 shutil.Error: %s" % e.strerror)
-        exit(1)
+        subprocess.run(
+            ["chcon", "-t", "httpd_sys_rw_content_t", ostree_repo_dir, "-R"],
+            check=True,
+            text=True,
+        )
 
-    if e is subprocess.CalledProcessError:
-        print("💥 subprocess.CalledProcessError: %s" % e.stderr)
-        exit(1)
-
-    if e is OSError:
-        print("💥 OSError: %s" % e.strerror)
-        exit(1)
+except shutil.Error as e:
+    exit("💥 shutil.Error: %s" % e.strerror)
+except subprocess.CalledProcessError as e:
+    exit("💥 subprocess.CalledProcessError: %s" % e.stderr)
+except OSError as e:
+    exit("💥 OSError: %s" % e.strerror)

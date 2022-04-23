@@ -9,5 +9,5 @@ rojig:
   description: "Immutable Fedora-based Xfce Desktop"
 
 repos:
-  - fedora-35
-  - fedora-35-updates
+  - fedora
+  - fedora-updates
