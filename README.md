@@ -4,13 +4,6 @@ This is an immutable Fedora-based XFCE desktop. It uses [rpm-ostree](https://cor
 
 There are currently no installer images, but Vauxite may be installed from an existing OSTree-based system like [Fedora Silverblue](https://silverblue.fedoraproject.org/) or [Fedora IoT](https://getfedora.org/en/iot/).
 
-## Branches
-
-| Branch | Based on                      |
-| ------ | ----------------------------- |
-| stable | Current stable Fedora release |
-| devel  | Next Fedora release           |
-
 ## Usage
 
 Add my server URL as a new remote:
