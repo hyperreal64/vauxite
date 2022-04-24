@@ -12,60 +12,58 @@ import subprocess
 base_dir = os.getcwd()
 treefile = os.path.join(base_dir, "src/vauxite.yaml")
 lockfile = os.path.join(base_dir, "src/overrides.yaml")
-ostree_cache_dir = "/var/cache/ostree"
-srv_root = "/srv/ostree"
-ostree_repo_dir = os.path.join(srv_root, "vauxite")
-ostree_repo_tmpdir = os.path.join(srv_root, "vauxite.new")
+working_dir = os.path.join(base_dir, "build")
+ostree_cache_dir = os.path.join(working_dir, "cache")
+ostree_repo_dir = os.path.join(working_dir, "repo")
+srv_repo_dir = "/srv/ostree/vauxite"
 
 # Check if running as root
 if os.geteuid() != 0:
     exit("🔒️ Permission denied. Are you root?")
 
 # Check if required commands exist
+print("⚡️ Running preliminary checks...")
+if shutil.which("ostree") is None:
+    exit("💥 ostree is not installed")
+if shutil.which("rpm-ostree") is None:
+    exit("💥 rpm-ostree is not installed")
+
+# Setup the build environment
+print("🔨 Setting up build environment...")
+if not os.path.exists(treefile):
+    exit("💥 vauxite.yaml does not exist")
+if not os.path.exists(ostree_cache_dir):
+    os.makedirs(ostree_cache_dir)
+if not os.path.exists(ostree_repo_dir):
+    os.makedirs(ostree_repo_dir)
+
+# Initialize the new OSTree repo if it is empty
 try:
-    print("⚡️ Running preliminary checks...")
+    if not os.listdir(ostree_repo_dir):
+        print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_dir)
+        subprocess.run(
+            [
+                "ostree",
+                "--repo=%s" % ostree_repo_dir,
+                "init",
+                "--mode=archive-z2",
+            ],
+            check=True,
+            text=True,
+        )
+except subprocess.CalledProcessError as cpe:
+    print("💥 CalledProcessError")
+    print("Command: %s" % cpe.cmd)
+    print("Error: %s" % cpe.stderr)
 
-    if shutil.which("ostree") is None:
-        exit("💥 ostree is not installed")
+# Build the ostree
+print("⚡️ Building tree...")
+if os.path.exists(lockfile) and os.path.getsize(lockfile) > 0:
+    cmd_tail = "--ex-lockfile=%s %s" % (lockfile, treefile)
+else:
+    cmd_tail = "%s" % treefile
 
-    if shutil.which("rpm-ostree") is None:
-        exit("💥 rpm-ostree is not installed")
-
-    # Setup the build environment
-    print("🔨 Setting up build environment...")
-
-    if not os.path.exists(treefile):
-        exit("💥 vauxite.yaml does not exist")
-
-    if os.path.exists(ostree_repo_tmpdir):
-        shutil.rmtree(ostree_repo_tmpdir)
-    os.makedirs(ostree_repo_tmpdir)
-
-    if not os.path.exists(ostree_cache_dir):
-        os.makedirs(ostree_cache_dir)
-
-    # Initialize the new OSTree repo
-    print("🌱 Initializing the OSTree repository at %s..." % ostree_repo_tmpdir)
-
-    subprocess.run(
-        [
-            "ostree",
-            "--repo=%s" % ostree_repo_tmpdir,
-            "init",
-            "--mode=archive-z2",
-        ],
-        check=True,
-        text=True,
-    )
-
-    # Build the ostree
-    print("⚡️ Building tree...")
-
-    if os.path.exists(lockfile) and os.path.getsize(lockfile) > 0:
-        cmd_tail = "--ex-lockfile=%s %s" % (lockfile, treefile)
-    else:
-        cmd_tail = "%s" % treefile
-
+try:
     subprocess.run(
         [
             "rpm-ostree",
@@ -73,56 +71,65 @@ try:
             "tree",
             "--unified-core",
             "--cachedir=%s" % ostree_cache_dir,
-            "--repo=%s" % ostree_repo_tmpdir,
+            "--repo=%s" % ostree_repo_dir,
             cmd_tail,
         ],
         check=True,
         text=True,
     )
-    print()
+except subprocess.CalledProcessError as cpe:
+    print("💥 CalledProcessError")
+    print("Command: %s" % cpe.cmd)
+    print("Error: %s" % cpe.stderr)
 
-    # Generate the ostree summary
-    print("✏️ Generating summary...")
+# Generate the ostree summary
+print("✏️ Generating summary...")
 
+try:
     subprocess.run(
-        ["ostree", "summary", "--repo=%s" % ostree_repo_tmpdir, "--update"],
+        ["ostree", "summary", "--repo=%s" % ostree_repo_dir, "--update"],
         check=True,
         text=True,
     )
+except subprocess.CalledProcessError as cpe:
+    print("💥 CalledProcessError")
+    print("Command: %s" % cpe.cmd)
+    print("Error: %s" % cpe.stderr)
 
-    # Move repository to web server root
-    print("🚚 Moving built repository to web server root...")
+# Clean up
+print("🗑️  Cleaning up...")
+for dir in glob.glob("/var/tmp/rpm-ostree.*"):
+    shutil.rmtree(dir, ignore_errors=True)
 
-    if selinux.is_selinux_enabled():
-        if os.path.exists(ostree_repo_dir):
-            shutil.rmtree(ostree_repo_dir)
-        selinux.install(ostree_repo_tmpdir, ostree_repo_dir)
-    else:
-        shutil.move(ostree_repo_tmpdir, ostree_repo_dir)
+# Use rsync to move built repository to web server root
+print("🚚 Moving built repository to web server root")
 
-    # Clean up
-    print("🗑️  Cleaning up...")
+try:
+    subprocess.run(
+        ["rsync", "-aAX", "%s/" % ostree_repo_dir, srv_repo_dir],
+        check=True,
+        text=True,
+    )
+except subprocess.CalledProcessError as cpe:
+    print("💥 CalledProcessError")
+    print("Command: %s" % cpe.cmd)
+    print("Error: %s" % cpe.stderr)
 
-    for dir in glob.glob("/var/tmp/rpm-ostree.*"):
-        shutil.rmtree(dir)
-
-    # Change SELinux context to httpd_sys_content_t and httpd_sys_rw_content_t
-    if selinux.is_selinux_enabled():
+# Change SELinux context to httpd_sys_content_t and httpd_sys_rw_content_t
+if selinux.is_selinux_enabled():
+    try:
         subprocess.run(
-            ["chcon", "-t", "httpd_sys_content_t", ostree_repo_dir, "-R"],
+            ["chcon", "-t", "httpd_sys_content_t", srv_repo_dir, "-R"],
             check=True,
             text=True,
         )
 
         subprocess.run(
-            ["chcon", "-t", "httpd_sys_rw_content_t", ostree_repo_dir, "-R"],
+            ["chcon", "-t", "httpd_sys_rw_content_t", srv_repo_dir, "-R"],
             check=True,
             text=True,
         )
-
-except shutil.Error as e:
-    exit("💥 shutil.Error: %s" % e.strerror)
-except subprocess.CalledProcessError as e:
-    exit("💥 subprocess.CalledProcessError: %s" % e.stderr)
-except OSError as e:
-    exit("💥 OSError: %s" % e.strerror)
+    except subprocess.CalledProcessError as cpe:
+        print("💥 CalledProcessError")
+        print("Command: %s" % cpe.cmd)
+        print("Error: %s" % cpe.stderr)
