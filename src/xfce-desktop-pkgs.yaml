@@ -1,4 +1,4 @@
-include: "../lib/workstation-ostree-config_f35/fedora-common-ostree.yaml"
+include: "../lib/workstation-ostree-config_f36/fedora-common-ostree.yaml"
 packages:
   - NetworkManager-openconnect-gnome
   - NetworkManager-openvpn-gnome

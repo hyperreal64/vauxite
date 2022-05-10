@@ -1,6 +1,6 @@
 [fedora]
-name=Fedora 35 $basearch
-mirrorlist=https://mirrors.fedoraproject.org/metalink?repo=fedora-35&arch=$basearch
+name=Fedora 36 $basearch
+mirrorlist=https://mirrors.fedoraproject.org/metalink?repo=fedora-36&arch=$basearch
 enabled=0
 gpgcheck=1
 metadata_expire=1d
