@@ -1,7 +1,3 @@
-[submodule "lib/workstation-ostree-config_f35"]
-	path = lib/workstation-ostree-config_f35
-	url = https://pagure.io/workstation-ostree-config
-	branch = f35
 [submodule "lib/workstation-ostree-config_f36"]
 	path = lib/workstation-ostree-config_f36
 	url = https://pagure.io/workstation-ostree-config
