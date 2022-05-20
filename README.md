@@ -21,7 +21,7 @@ sudo ostree admin pin 0
 Rebase the tree to Vauxite:
 
 ```bash
-sudo rpm-ostree rebase vauxite:vauxite/f35/x86_64/base
+sudo rpm-ostree rebase vauxite:vauxite/f36/x86_64/base
 
 ```
 
@@ -40,3 +40,5 @@ To perform system updates:
 ```bash
 sudo rpm-ostree update
 ```
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N4N2CT2JG)
