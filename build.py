@@ -24,9 +24,11 @@ def handle_cpe(cpe: subprocess.CalledProcessError):
     print("💥 CalledProcessError")
     print("Command: %s" % cpe.cmd)
     if cpe.output:
-        print("Output: %s" % cpe.output)
+        print("💥 Output: %s" % cpe.output)
+    if cpe.stderr:
+        print("💥 Error: %s" % cpe.stderr)
     if cpe.returncode:
-        print("Return code: %d" % cpe.returncode)
+        print("💥 Return code: %d" % cpe.returncode)
     exit(1)
 
 
