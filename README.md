@@ -33,7 +33,7 @@ sudo rpm-ostree rollback
 
 ## System updates
 
-A new Vauxite tree is built every Tuesday and Saturday, to keep up with software bug fixes and security updates from upstream.
+A new Vauxite tree is built every Saturday.
 
 To perform system updates:
 

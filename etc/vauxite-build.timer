@@ -1,0 +1,10 @@
+[Unit]
+Description=Build Vauxite OSTree every Sat at 3 AM UTC
+
+[Timer]
+Persistent=true
+OnCalendar=Sat *-*-* 3:00:00
+Unit=vauxite-build.service
+
+[Install]
+WantedBy=timers.target

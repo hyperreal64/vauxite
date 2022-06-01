@@ -1,0 +1,9 @@
+[Unit]
+Description=Build Vauxite OSTree
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python /opt/vauxite/build.py
+#ExecStartPost=/usr/bin/curl -m 10 --retry 5 https://hc-ping.com/<uuid>
+Restart=on-abnormal
+WorkingDirectory=/opt/vauxite
