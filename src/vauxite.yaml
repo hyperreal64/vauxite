@@ -8,6 +8,9 @@ rojig:
   license: MIT
   description: "Immutable Fedora-based Xfce Desktop"
 
+packages:
+  - fedora-release-ostree-desktop
+
 repos:
   - fedora
   - fedora-updates
