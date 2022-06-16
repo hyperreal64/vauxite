@@ -3,10 +3,11 @@
 
 import glob
 import os
-import selinux
+import re
 import shutil
 import subprocess
 
+import selinux
 
 # Global variables
 base_dir = os.getcwd()
@@ -14,8 +15,8 @@ treefile = os.path.join(base_dir, "src/vauxite.yaml")
 lockfile = os.path.join(base_dir, "src/overrides.yaml")
 working_dir = os.path.join(base_dir, "build")
 ostree_cache_dir = os.path.join(working_dir, "cache")
-ostree_repo_dir = os.path.join(working_dir, "repo")
-srv_repo_dir = "/srv/ostree/vauxite"
+ostree_repo_dir = "/srv/ostree/vauxite"
+ref = "vauxite/f36/x86_64/base"
 no_changes = False
 
 
@@ -117,15 +118,32 @@ if not no_changes:
     for dir in glob.glob("/var/tmp/rpm-ostree.*"):
         shutil.rmtree(dir, ignore_errors=True)
 
-    # Use rsync to copy built repository to web server root
-    print("🚚 Copying built repository to web server root")
-
     try:
-        subprocess.run(
-            ["rsync", "-aAX", "%s/" % ostree_repo_dir, srv_repo_dir],
+        ostree_log = subprocess.run(
+            ["ostree", "log", "--repo=%s" % ostree_repo_dir, ref],
             check=True,
             text=True,
+            capture_output=True,
         )
+
+        dates = [item for item in ostree_log.stdout.splitlines() if "Date" in item]
+        if dates[2]:
+            date_match = re.search(r"\d{4}-\d{2}-\d{2}", dates[2])
+            if date_match:
+                prune_date = date_match.group()
+
+                subprocess.run(
+                    [
+                        "ostree",
+                        "prune",
+                        "--repo=%s" % ostree_repo_dir,
+                        "--keep-younger-than=%s" % prune_date,
+                    ],
+                    check=True,
+                    text=True,
+                )
+        else:
+            print("🌱  Nothing to prune...")
     except subprocess.CalledProcessError as cpe:
         handle_cpe(cpe)
 
@@ -133,13 +151,13 @@ if not no_changes:
     if selinux.is_selinux_enabled():
         try:
             subprocess.run(
-                ["chcon", "-t", "httpd_sys_content_t", srv_repo_dir, "-R"],
+                ["chcon", "-t", "httpd_sys_content_t", ostree_repo_dir, "-R"],
                 check=True,
                 text=True,
             )
 
             subprocess.run(
-                ["chcon", "-t", "httpd_sys_rw_content_t", srv_repo_dir, "-R"],
+                ["chcon", "-t", "httpd_sys_rw_content_t", ostree_repo_dir, "-R"],
                 check=True,
                 text=True,
             )
