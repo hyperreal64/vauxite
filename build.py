@@ -7,8 +7,6 @@ import re
 import shutil
 import subprocess
 
-import selinux
-
 # Global variables
 base_dir = os.getcwd()
 treefile = os.path.join(base_dir, "src/vauxite.yaml")
@@ -148,18 +146,17 @@ if not no_changes:
         handle_cpe(cpe)
 
     # Change SELinux context to httpd_sys_content_t and httpd_sys_rw_content_t
-    if selinux.is_selinux_enabled():
-        try:
-            subprocess.run(
-                ["chcon", "-t", "httpd_sys_content_t", ostree_repo_dir, "-R"],
-                check=True,
-                text=True,
-            )
+    try:
+        subprocess.run(
+            ["chcon", "-t", "httpd_sys_content_t", ostree_repo_dir, "-R"],
+            check=True,
+            text=True,
+        )
 
-            subprocess.run(
-                ["chcon", "-t", "httpd_sys_rw_content_t", ostree_repo_dir, "-R"],
-                check=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as cpe:
-            handle_cpe(cpe)
+        subprocess.run(
+            ["chcon", "-t", "httpd_sys_rw_content_t", ostree_repo_dir, "-R"],
+            check=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as cpe:
+        handle_cpe(cpe)
