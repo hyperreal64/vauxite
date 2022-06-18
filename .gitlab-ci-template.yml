@@ -1,0 +1,212 @@
+stages:
+  - lint
+  - build
+  - image
+  - check
+  - yield
+  - deltas
+
+variables:
+  CI_OSTREE_REF_ARCH: x86_64
+
+.lint-json:
+  stage: lint
+  inherit:
+    default: false
+  image: docker.io/library/fedora:36
+  before_script:
+    - dnf install -y python3-demjson
+  script:
+    - jsonlint ./**/*.json
+
+##
+# variables:
+# - CI_OSTREE_REF_ARCH
+# - CI_OSTREE_BUILD_OPTIONS
+# - CI_GPG_KEY
+# - CI_GPG_KEY_PASSPHRASE
+# - CI_SSHFS_TARGET
+# - CI_SSHFS_AUTH
+# - CI_SSHFS_PATH
+# - CI_SSHFS_PRIVATE_KEY
+.build:
+  stage: build
+  image: quay.io/os-forge/rpm-ostree-engine:0.7.1
+  before_script:
+    - if [ "$CI_SSHFS_TARGET" != "" ]; then rose-ci-prepare sshfs --sshfs-target="$CI_SSHFS_TARGET" --sshfs-auth="$CI_SSHFS_AUTH" --sshfs-path="$CI_SSHFS_PATH" --sshfs-key="$CI_SSHFS_PRIVATE_KEY"; fi
+  script:
+    - export OSTREE_BRANCH="$(rose-ci-branch --name="$CI_OSTREE_REF_NAME" --arch="$CI_OSTREE_REF_ARCH")"
+    - echo "OSTREE_BRANCH=$OSTREE_BRANCH" >> .env
+    - export IMAGE_NAME="${OSTREE_BRANCH//\//-}-iot.raw"
+    - echo "IMAGE_NAME=$IMAGE_NAME" >> .env
+    - if [ ! -d ./.cache ] && [ -d /cache ]; then ln -s /cache ./.cache; fi
+    # Setup GPG (optional)
+    - if [ "$CI_GPG_KEY" != "" ]; then cat "$CI_GPG_KEY" | gpg --batch --import; fi
+    # Build OSTree commit (under test) into cache
+    - rose-build --branch="$OSTREE_BRANCH" --gpg-key-id="$CI_GPG_KEY_ID" --gpg-key-passphrase="$CI_GPG_KEY_PASSPHRASE" --no-deploy $CI_OSTREE_BUILD_OPTIONS
+    - if [ "$CI_GPG_KEY_ID" != "" ]; then gpg --batch --export "$CI_GPG_KEY_ID" > '.intermediate-repo/.trustedkeys.gpg'; fi
+  cache:
+    - key: "repo-staging-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: push
+      paths:
+        - ./.intermediate-repo/
+  artifacts:
+    reports:
+      dotenv: .env
+
+##
+# variables:
+# - CI_OSTREE_REF_ARCH
+# - CI_OSTREE_REMOTE
+# - CI_IMAGE_BUILD_OPTIONS
+.image:
+  stage: image
+  image: quay.io/os-forge/rpm-ostree-engine:0.7.1
+  before_script:
+    # Prepare loop devices for image build
+    - for i in `seq 0 7`; do mknod /dev/loop$i b 7 $i || :; done
+  script:
+    - CI_OSTREE_GPG_KEY="$(ls -1 '.intermediate-repo/.trustedkeys.gpg' || :)"
+    - rose-image --branch="$OSTREE_BRANCH" --mirror=./.intermediate-repo --remote="$CI_OSTREE_REMOTE" --image="$IMAGE_NAME" --gpg-import="$CI_OSTREE_GPG_KEY" $CI_IMAGE_BUILD_OPTIONS
+  cache:
+    - key: "repo-staging-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./.intermediate-repo/
+    - key: "image-latest-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: push
+      paths:
+        - ./*.raw
+
+##
+# variables:
+# - CI_OSTREE_REF_ARCH
+.check:
+  stage: check
+  variables:
+    ROSE_SPAWN_OFF_TIMEOUT_SEC: 300
+    ROSE_GUEST_SSH_TIMEOUT_SEC: 300
+    ROSE_GUEST_SSH_RETRIES_NUM: 10
+  image: quay.io/os-forge/rpm-ostree-engine:0.7.1
+  artifacts:
+    expire_in: 28 days
+    when: always
+    paths:
+      - ./varfiles.tar
+      - ./logs/*
+
+.check-install:
+  extends: .check
+  before_script:
+    - for i in `seq 0 7`; do mknod /dev/loop$i b 7 $i || :; done
+    - rose-shell --image="$IMAGE_NAME" -- /rose/image-scripts/prepare
+  script:
+    - rose-check --image="$IMAGE_NAME" --memory=512 --arch="$CI_OSTREE_REF_ARCH" -- /rose/guest-scripts/running
+  after_script:
+    - rose-shell --image="$IMAGE_NAME" -- /rose/image-scripts/collect
+    - cat ./logs/history.txt
+  cache:
+    - key: "image-latest-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./*.raw
+
+.check-upgrade:
+  extends: .check
+  before_script:
+    - test -f "$IMAGE_NAME" || exit 99
+    - for i in `seq 0 7`; do mknod /dev/loop$i b 7 $i || :; done
+    - rose-shell --image="$IMAGE_NAME" -- /rose/image-scripts/prepare
+    - rose-shell --image="$IMAGE_NAME" -- /rose/image-scripts/implant ./.intermediate-repo
+  script:
+    - rose-check --image="$IMAGE_NAME" --memory=512 --arch="$CI_OSTREE_REF_ARCH" -- /rose/guest-scripts/upgrade
+    - rose-check --image="$IMAGE_NAME" --memory=512 --arch="$CI_OSTREE_REF_ARCH" -- /rose/guest-scripts/running
+  after_script:
+    - test -f "$IMAGE_NAME" || exit 99
+    - rose-shell --image="$IMAGE_NAME" -- /rose/image-scripts/collect
+    - cat ./logs/history.txt
+  allow_failure:
+    exit_codes: 99
+  cache:
+    - key: "repo-staging-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./.intermediate-repo
+    - key: "image-stable-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./*.raw
+
+##
+# variables:
+# - CI_OSTREE_REF_ARCH
+# - CI_SSHFS_TARGET
+# - CI_SSHFS_AUTH
+# - CI_SSHFS_PATH
+# - CI_SSHFS_PRIVATE_KEY
+# - CI_YIELD_DEPLOY_OPTIONS
+.yield:
+  stage: yield
+  image: quay.io/os-forge/rpm-ostree-engine:0.7.1
+  before_script:
+    - rose-ci-prepare sshfs --sshfs-target="$CI_SSHFS_TARGET" --sshfs-auth="$CI_SSHFS_AUTH" --sshfs-path="$CI_SSHFS_PATH" --sshfs-key="$CI_SSHFS_PRIVATE_KEY"
+  script:
+    - export YIELD_NAME="${IMAGE_NAME//-iot.raw/-$(date +%Y%m%d)-iot.raw}"
+    - rose-deploy --branch="$OSTREE_BRANCH" $CI_YIELD_DEPLOY_OPTIONS
+    # Compress the Image
+    - ln -f "$IMAGE_NAME" "$YIELD_NAME"
+    - md5sum "$YIELD_NAME" > "$IMAGE_NAME".MD5SUM
+    - xz -f -0 -T0 "$YIELD_NAME"
+  after_script:
+    - sync
+  cache:
+    - key: "repo-staging-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./.intermediate-repo/
+    - key: "image-latest-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: pull
+      paths:
+        - ./*.raw
+    - key: "image-stable-$CI_COMMIT_REF_SLUG-$CI_OSTREE_REF_ARCH"
+      policy: push
+      paths:
+        - ./*.raw
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - ./*.raw.MD5SUM
+      - ./*.raw.xz
+  resource_group: deploy-repo
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+
+##
+# variables:
+# - CI_OSTREE_REF_ARCH
+# - CI_SSHFS_TARGET
+# - CI_SSHFS_AUTH
+# - CI_SSHFS_PATH
+# - CI_SSHFS_PRIVATE_KEY
+# - CI_GPG_KEY
+# - CI_GPG_KEY_PASSPHRASE
+# - CI_GPG_KEY_ID
+.deltas:
+  stage: deltas
+  image: quay.io/os-forge/rpm-ostree-engine:0.7.1
+  before_script:
+    - rose-ci-prepare sshfs --sshfs-target="$CI_SSHFS_TARGET" --sshfs-auth="$CI_SSHFS_AUTH" --sshfs-path="$CI_SSHFS_PATH" --sshfs-key="$CI_SSHFS_PRIVATE_KEY"
+  script:
+    - if [ ! -d ./.cache ] && [ -d /cache ]; then ln -s /cache ./.cache; fi
+    # Setup GPG
+    - if [ "$CI_GPG_KEY" != "" ]; then cat "$CI_GPG_KEY" | gpg --batch --import; fi
+    # Configure the cache ttl to live long enough for the build to succeed
+    - if [ "$CI_GPG_KEY" != "" ]; then echo "default-cache-ttl 7200" > "/root/.gnupg/gpg-agent.conf"; fi
+    # Build deltas
+    - rose-delta --branch="$OSTREE_BRANCH" --gpg-key-id="$CI_GPG_KEY_ID" --gpg-key-passphrase="$CI_GPG_KEY_PASSPHRASE"
+  after_script:
+    - sync
+  resource_group: deploy-repo
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+

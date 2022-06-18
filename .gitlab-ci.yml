@@ -1,0 +1,12 @@
+include:
+  - remote: https://gitlab.com/hyperreal/vauxite/.gitlab-ci-template.yml
+
+variables:
+  CI_OSTREE_REF_NAME: vauxite
+
+build-ostree-amd64:
+  extends: .build-ostree
+  before_script:
+    - true
+  tags:
+    - amd64
