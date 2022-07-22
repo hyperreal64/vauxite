@@ -23,7 +23,7 @@ sudo ostree admin pin 0
 Rebase the tree to Vauxite:
 
 ```bash
-sudo rpm-ostree rebase vauxite:vauxite/f36/x86_64/base
+sudo rpm-ostree rebase vauxite:vauxite/f36/x86_64/main
 
 ```
 
